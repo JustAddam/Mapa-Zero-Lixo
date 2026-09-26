@@ -102,23 +102,25 @@ function page_admin(PDO $pdo, array $content): void
             flash('success', 'Conteúdo publicado no site.');
         // Cria ou atualiza artigo do Manual de Reciclagem.
         } elseif ($action === 'save_article') {
-            $title = post('title');
-            $slug = post('slug');
-            $excerpt = post('excerpt');
-            $body = sanitize_rich_text(post('body'));
-            $imageUrl = post('imageUrl') ?: null;
-            $linkUrl = post('linkUrl') ?: null;
-            $status = post('status') === 'published' ? 'published' : 'draft';
-            $id = (int) post('id');
-            if ($id) {
-                $pdo->prepare('UPDATE manual_articles SET title=?, slug=?, excerpt=?, body=?, imageUrl=?, linkUrl=?, status=? WHERE id=?')
-                    ->execute([$title, $slug, $excerpt, $body, $imageUrl, $linkUrl, $status, $id]);
-                flash('success', 'Artigo atualizado.');
-            } else {
-                $pdo->prepare('INSERT INTO manual_articles (title, slug, excerpt, body, imageUrl, linkUrl, status, createdBy) VALUES (?,?,?,?,?,?,?,?)')
-                    ->execute([$title, $slug, $excerpt, $body, $imageUrl, $linkUrl, $status, (int) $user['id']]);
-                flash('success', 'Artigo criado.');
+            if (!empty($_FILES['cover']['tmp_name']) && is_uploaded_file($_FILES['cover']['tmp_name'])) {
+                $uploaded = save_upload('manual', 'cover');
+                if (!empty($uploaded['url'])) {
+                    $_POST['imageUrl'] = $uploaded['url'];
+                } elseif (!empty($uploaded['error'])) {
+                    flash('error', $uploaded['error']);
+                }
             }
+            $saved = save_manual_article($pdo, $_POST, (int) $user['id']);
+            if (isset($saved['error'])) {
+                flash('error', $saved['error']);
+                $back = (int) post('id');
+                redirect('/area-privada-mapazerolixo' . ($back ? '?artigo=' . $back : '') . '#artigos');
+            }
+            $published = ($saved['status'] ?? '') === 'published';
+            flash('success', $published
+                ? 'Artigo publicado. Ele já aparece no Manual de Reciclagem.'
+                : 'Rascunho salvo. Publique para exibir na página pública.');
+            redirect('/area-privada-mapazerolixo?artigo=' . (int) $saved['id'] . '#artigos');
         // Cadastro de plano (não cobrado nesta fase).
         } elseif ($action === 'save_plan') {
             $name = post('name');
@@ -159,7 +161,7 @@ function page_admin(PDO $pdo, array $content): void
     }
     $form = $content;
     $articleId = (int) ($_GET['artigo'] ?? 0);
-    $article = ['id' => 0, 'title' => '', 'slug' => '', 'excerpt' => '', 'body' => '', 'imageUrl' => '', 'linkUrl' => '', 'status' => 'draft'];
+    $article = ['id' => 0, 'title' => '', 'slug' => '', 'excerpt' => '', 'body' => '', 'imageUrl' => '', 'linkUrl' => '', 'status' => 'published'];
     foreach ($articles as $a) {
         if ((int) $a['id'] === $articleId) {
             $article = $a;
@@ -324,37 +326,45 @@ function page_admin(PDO $pdo, array $content): void
             </form>
           </section>
 
-          <section class="content-editor manual-articles-editor">
-            <div class="card-header"><div><span class="section-kicker">Manual de Reciclagem</span><h2>Artigos e referências</h2></div><a class="button button-ghost button-small" href="/area-privada-mapazerolixo">Novo artigo</a></div>
+          <section class="content-editor manual-articles-editor" id="artigos">
+            <div class="card-header"><div><span class="section-kicker">Manual de Reciclagem</span><h2>Artigos e referências</h2></div><a class="button button-ghost button-small" href="/area-privada-mapazerolixo#artigos">Novo artigo</a></div>
+            <p class="editor-help">Publique para o texto aparecer na página pública <a href="/manual" target="_blank" rel="noreferrer">/manual</a>.</p>
             <div class="articles-admin-layout">
               <aside class="article-admin-list">
+                <?php if (!$articles): ?>
+                  <div class="empty-dashboard"><strong>Nenhum artigo ainda.</strong><span>Preencha o formulário ao lado e publique.</span></div>
+                <?php endif; ?>
                 <?php foreach ($articles as $a): ?>
-                  <a class="<?= $articleId === (int) $a['id'] ? 'article-admin-item active' : 'article-admin-item' ?>" href="/area-privada-mapazerolixo?artigo=<?= (int) $a['id'] ?>"><strong><?= e($a['title']) ?></strong><small><?= e($a['status']) ?></small></a>
+                  <a class="<?= $articleId === (int) $a['id'] ? 'article-admin-item active' : 'article-admin-item' ?>" href="/area-privada-mapazerolixo?artigo=<?= (int) $a['id'] ?>#artigos"><strong><?= e($a['title']) ?></strong><small><?= ($a['status'] === 'published') ? 'publicado no site' : 'rascunho' ?></small></a>
                 <?php endforeach; ?>
               </aside>
-              <form class="article-admin-form" method="post">
+              <form class="article-admin-form" method="post" enctype="multipart/form-data" id="article-admin-form">
                 <?= csrf_field() ?>
                 <input type="hidden" name="action" value="save_article" />
                 <input type="hidden" name="id" value="<?= (int) $article['id'] ?>" />
                 <div class="form-grid">
-                  <label class="form-field full"><span>Título</span><input name="title" required value="<?= e($article['title']) ?>" /></label>
-                  <label class="form-field"><span>Slug</span><input name="slug" required value="<?= e($article['slug']) ?>" /></label>
+                  <label class="form-field full"><span>Título</span><input name="title" required maxlength="180" value="<?= e($article['title']) ?>" /></label>
+                  <label class="form-field"><span>Endereço (slug)</span><input name="slug" value="<?= e($article['slug']) ?>" placeholder="gerado a partir do título" autocomplete="off" /></label>
                   <label class="form-field"><span>Status</span><select name="status"><option value="draft" <?= $article['status'] === 'draft' ? 'selected' : '' ?>>Rascunho</option><option value="published" <?= $article['status'] === 'published' ? 'selected' : '' ?>>Publicado</option></select></label>
-                  <label class="form-field full"><span>Resumo</span><textarea name="excerpt" required><?= e($article['excerpt']) ?></textarea></label>
+                  <label class="form-field full"><span>Resumo</span><textarea name="excerpt" placeholder="Opcional: se vazio, usamos o início do conteúdo."><?= e($article['excerpt']) ?></textarea></label>
                   <label class="form-field full"><span>Conteúdo</span><textarea name="body" class="article-body-input js-rich" data-placeholder="Escreva o artigo com títulos, listas e destaques."><?= e($article['body']) ?></textarea></label>
                   <div class="form-field full cover-upload">
                     <span>Imagem do artigo</span>
+                    <?php $articleImg = public_media_url($article['imageUrl'] ?? ''); ?>
                     <div class="cover-upload-box">
-                      <input class="cover-file-input" type="file" id="article-cover-file" accept="image/jpeg,image/png,image/webp" data-upload="/api/upload.php?kind=manual" data-target="articleImage" />
+                      <input class="cover-file-input" type="file" name="cover" id="article-cover-file" accept="image/jpeg,image/png,image/webp" data-upload="/api/upload.php?kind=manual" data-target="articleImage" />
                       <label class="cover-upload-trigger" for="article-cover-file">Escolher imagem</label>
-                      <input name="imageUrl" id="articleImage" value="<?= e($article['imageUrl']) ?>" placeholder="https://..." />
-                      <?php $articleImg = (string) ($article['imageUrl'] ?? ''); ?>
+                      <input type="hidden" name="imageUrl" id="articleImage" value="<?= e($articleImg) ?>" />
+                      <small class="field-help">JPG, PNG ou WEBP. Até 5 MB. Publique depois do envio para aparecer no /manual com o efeito de capa.</small>
                       <img class="image-upload-preview<?= $articleImg ? '' : ' is-empty' ?>" <?= $articleImg ? 'src="' . e($articleImg) . '"' : '' ?> alt="Prévia" />
                     </div>
                   </div>
-                  <label class="form-field full"><span>Link de referência</span><input type="url" name="linkUrl" value="<?= e($article['linkUrl']) ?>" /></label>
+                  <label class="form-field full"><span>Link de referência</span><input type="text" name="linkUrl" inputmode="url" placeholder="https://..." value="<?= e($article['linkUrl']) ?>" /></label>
                 </div>
-                <button class="button button-primary" type="submit"><?= $article['id'] ? 'Salvar artigo' : 'Criar artigo' ?></button>
+                <div class="article-admin-actions">
+                  <button class="button button-primary" type="submit" name="intent" value="publish">Publicar no manual</button>
+                  <button class="button button-ghost" type="submit" name="intent" value="draft">Salvar rascunho</button>
+                </div>
               </form>
             </div>
           </section>

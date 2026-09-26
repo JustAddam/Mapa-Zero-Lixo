@@ -118,6 +118,7 @@
         }
         preview.src = data.url;
         preview.classList.remove("is-empty");
+        input.value = "";
       } catch (err) {
         alert("Não foi possível enviar a imagem.");
       } finally {
@@ -243,4 +244,36 @@
 
   // Ativa o editor rico em todo textarea marcado com a classe js-rich.
   document.querySelectorAll("textarea.js-rich").forEach(bindRichEditor);
+
+  // Preenche o slug a partir do título enquanto o campo ainda não foi editado à mão.
+  const articleForm = document.getElementById("article-admin-form");
+  if (articleForm) {
+    const title = articleForm.querySelector('input[name="title"]');
+    const slug = articleForm.querySelector('input[name="slug"]');
+    const toSlug = (value) =>
+      value
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 220);
+    if (title && slug) {
+      let auto = slug.value.trim() === "";
+      slug.addEventListener("input", () => {
+        auto = slug.value.trim() === "";
+      });
+      title.addEventListener("input", () => {
+        if (auto) slug.value = toSlug(title.value);
+      });
+    }
+    articleForm.addEventListener("submit", () => {
+      const file = articleForm.querySelector('input[type="file"]');
+      const url = articleForm.querySelector("#articleImage");
+      // Só limpa o arquivo se o AJAX já gravou a URL; senão o PHP envia a capa no POST.
+      if (file && url && url.value.trim()) {
+        file.value = "";
+      }
+    });
+  }
 })();

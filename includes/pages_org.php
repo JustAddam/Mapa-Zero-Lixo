@@ -102,7 +102,8 @@ function page_perfil(PDO $pdo, array $content, int $id): void
     }
     $hero = $org['heroTitle'] ?: $org['name'];
     $lede = $org['tagline'] ?: ($org['heroText'] ?: $org['description']);
-    $bg = $org['imageUrl'] ? "linear-gradient(90deg, {$org['primaryColor']}ee, {$org['primaryColor']}66), url(" . e($org['imageUrl']) . ")" : '';
+    $orgCover = public_media_url($org['imageUrl'] ?? '');
+    $bg = $orgCover !== '' ? "linear-gradient(90deg, {$org['primaryColor']}ee, {$org['primaryColor']}66), url(" . e($orgCover) . ")" : '';
     ?>
     <main>
       <section class="content-page">
@@ -164,7 +165,7 @@ function page_workspace(PDO $pdo, array $content): void
     if (is_post() && $organization && $organization['status'] === 'approved') {
         // Guarda rascunho da identidade visual até a curadoria aprovar.
         verify_csrf();
-        $imageUrl = post('imageUrl') ?: (string) ($organization['imageUrl'] ?? '');
+        $imageUrl = public_media_url(post('imageUrl') ?: (string) ($organization['imageUrl'] ?? ''));
         if (!empty($_FILES['cover']['tmp_name']) && is_uploaded_file($_FILES['cover']['tmp_name'])) {
             $uploaded = save_upload('org-' . (int) $user['id'], 'cover');
             if (!empty($uploaded['url'])) {
@@ -216,7 +217,7 @@ function page_workspace(PDO $pdo, array $content): void
         return;
     }
     $form = $organization ?: [];
-    $coverUrl = $form['pendingImageUrl'] ?? $form['imageUrl'] ?? '';
+    $coverUrl = public_media_url($form['pendingImageUrl'] ?? $form['imageUrl'] ?? '');
     $primary = $form['pendingPrimaryColor'] ?? ($form['primaryColor'] ?? '#173d32');
     $accent = $form['pendingAccentColor'] ?? ($form['accentColor'] ?? '#b7cf73');
     $heroTitle = $form['pendingHeroTitle'] ?? ($form['heroTitle'] ?? '');

@@ -129,10 +129,10 @@ function install_schema(PDO $pdo): void
         id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
         title VARCHAR(180) NOT NULL,
         slug VARCHAR(220) NOT NULL,
-        excerpt VARCHAR(500) NOT NULL,
-        body TEXT NOT NULL,
-        imageUrl VARCHAR(500) NULL,
-        linkUrl VARCHAR(500) NULL,
+        excerpt TEXT NOT NULL,
+        body MEDIUMTEXT NOT NULL,
+        imageUrl TEXT NULL,
+        linkUrl TEXT NULL,
         status ENUM('draft','published') NOT NULL DEFAULT 'draft',
         createdBy INT UNSIGNED NOT NULL,
         createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -140,4 +140,32 @@ function install_schema(PDO $pdo): void
         UNIQUE KEY manual_articles_slug_unique (slug),
         KEY idx_articles_status (status)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+}
+
+/** Ajusta colunas de artigos em instalações antigas (resumo curto derrubava o INSERT). */
+function ensure_runtime_schema(PDO $pdo): void
+{
+    static $done = false;
+    if ($done) {
+        return;
+    }
+    $done = true;
+    try {
+        $excerpt = $pdo->query("SHOW COLUMNS FROM manual_articles LIKE 'excerpt'")->fetch();
+        if ($excerpt && stripos((string) $excerpt['Type'], 'varchar') === 0) {
+            $pdo->exec('ALTER TABLE manual_articles MODIFY excerpt TEXT NOT NULL');
+        }
+        $body = $pdo->query("SHOW COLUMNS FROM manual_articles LIKE 'body'")->fetch();
+        if ($body && strcasecmp((string) $body['Type'], 'text') === 0) {
+            $pdo->exec('ALTER TABLE manual_articles MODIFY body MEDIUMTEXT NOT NULL');
+        }
+        foreach (['imageUrl', 'linkUrl'] as $col) {
+            $info = $pdo->query("SHOW COLUMNS FROM manual_articles LIKE " . $pdo->quote($col))->fetch();
+            if ($info && stripos((string) $info['Type'], 'varchar') === 0) {
+                $pdo->exec('ALTER TABLE manual_articles MODIFY `' . $col . '` TEXT NULL');
+            }
+        }
+    } catch (Throwable $e) {
+        // Tabela ainda não existe até o install.php; o restante do site segue.
+    }
 }

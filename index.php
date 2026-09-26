@@ -15,6 +15,16 @@ require __DIR__ . '/includes/pages_org.php';
 require __DIR__ . '/includes/pages_admin.php';
 
 $path = request_path();
+
+// Fotos em /uploads e o endpoint de envio, mesmo se o rewrite cair no index.
+if (serve_public_upload($path)) {
+    exit;
+}
+if ($path === '/api/upload.php' || $path === '/api/upload') {
+    handle_image_upload();
+    exit;
+}
+
 $pdo = db();
 $content = get_site_content($pdo);
 

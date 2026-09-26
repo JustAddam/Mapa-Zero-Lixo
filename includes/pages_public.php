@@ -161,26 +161,53 @@ function page_manual(PDO $pdo, array $content): void
               </article>
             <?php endforeach; ?>
           </div>
-          <?php if ($articles): ?>
-            <section class="manual-articles">
-              <div class="section-kicker">Leituras da rede</div>
-              <h2>Conteúdos para continuar o cuidado.</h2>
+          <section class="manual-articles" id="leituras">
+            <div class="section-kicker">Leituras da rede</div>
+            <h2>Conteúdos para continuar o cuidado.</h2>
+            <?php if ($articles): ?>
               <div class="manual-article-grid">
                 <?php foreach ($articles as $article): ?>
-                  <article class="manual-article-card">
-                    <?php if ($article['imageUrl']): ?><img src="<?= e($article['imageUrl']) ?>" alt="" /><?php endif; ?>
-                    <div>
+                  <?php
+                    $excerptHtml = (string) ($article['excerpt'] ?? '');
+                    $bodyHtml = (string) ($article['body'] ?? '');
+                    $cover = public_media_url($article['imageUrl'] ?? '');
+                    if ($cover === '') {
+                        foreach ([$bodyHtml, $excerptHtml] as $htmlSource) {
+                            if (preg_match('/<img[^>]+src=["\']([^"\']+)["\']/i', $htmlSource, $imgMatch)) {
+                                $cover = public_media_url($imgMatch[1]);
+                                if ($cover !== '') {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if ($cover !== '') {
+                        $excerptHtml = preg_replace('/<img\b[^>]*>/i', '', $excerptHtml) ?? $excerptHtml;
+                        $bodyHtml = preg_replace('/<img\b[^>]*>/i', '', $bodyHtml) ?? $bodyHtml;
+                    }
+                  ?>
+                  <article class="manual-article-card<?= $cover === '' ? ' no-cover' : '' ?>" id="artigo-<?= e($article['slug']) ?>">
+                    <?php if ($cover !== ''): ?>
+                      <figure class="manual-article-cover">
+                        <img src="<?= e($cover) ?>" alt="<?= e($article['title']) ?>" width="220" height="220" />
+                      </figure>
+                    <?php endif; ?>
+                    <div class="manual-article-copy">
                       <span class="tag">Artigo</span>
                       <h3><?= e($article['title']) ?></h3>
-                      <div class="article-excerpt rich-text-output"><?= rich($article['excerpt']) ?></div>
-                      <div class="article-body rich-text-output"><?= rich($article['body']) ?></div>
+                      <?php if (trim(strip_tags($excerptHtml)) !== ''): ?><div class="article-excerpt rich-text-output"><?= rich($excerptHtml) ?></div><?php endif; ?>
+                      <?php if (trim(strip_tags($bodyHtml)) !== ''): ?>
+                        <div class="article-body rich-text-output"><?= rich($bodyHtml) ?></div>
+                      <?php endif; ?>
                       <?php if ($article['linkUrl']): ?><a class="text-link" href="<?= e($article['linkUrl']) ?>" target="_blank" rel="noreferrer">Ver referência</a><?php endif; ?>
                     </div>
                   </article>
                 <?php endforeach; ?>
               </div>
-            </section>
-          <?php endif; ?>
+            <?php else: ?>
+              <p class="muted">Novos artigos publicados no painel aparecem aqui.</p>
+            <?php endif; ?>
+          </section>
           <div class="manual-callout">
             <div>
               <span class="section-kicker">Para lembrar</span>

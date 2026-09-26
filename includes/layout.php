@@ -32,7 +32,7 @@ function render_header(string $section, array $content): void
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Ephesis&family=Kumbh+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
-  <link rel="stylesheet" href="/css/app.css" />
+  <link rel="stylesheet" href="/css/app.css?v=<?= (int) (@filemtime(__DIR__ . '/../css/app.css') ?: time()) ?>" />
 </head>
 <body class="min-h-screen bg-sand text-ink">
   <header class="site-header">

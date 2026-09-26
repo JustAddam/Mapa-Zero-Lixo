@@ -20,6 +20,8 @@ function db(): PDO
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         PDO::ATTR_EMULATE_PREPARES => false,
     ]);
+    require_once __DIR__ . '/schema.php';
+    ensure_runtime_schema($pdo);
     return $pdo;
 }
 
@@ -111,6 +113,86 @@ function all_articles(PDO $pdo): array
         $row['body'] = sanitize_rich_text($row['body']);
     }
     return $rows;
+}
+
+/** Garante slug único na tabela de artigos. */
+function unique_article_slug(PDO $pdo, string $slug, int $ignoreId = 0): string
+{
+    $base = $slug !== '' ? $slug : 'artigo';
+    $candidate = $base;
+    $n = 1;
+    $stmt = $pdo->prepare('SELECT id FROM manual_articles WHERE slug = ? AND id <> ? LIMIT 1');
+    while (true) {
+        $stmt->execute([$candidate, $ignoreId]);
+        if (!$stmt->fetch()) {
+            return $candidate;
+        }
+        $n++;
+        $candidate = substr($base, 0, 210) . '-' . $n;
+    }
+}
+
+/**
+ * Cria ou atualiza artigo do manual.
+ * @return array{id:int}|array{error:string}
+ */
+function save_manual_article(PDO $pdo, array $input, int $userId): array
+{
+    $title = trim((string) ($input['title'] ?? ''));
+    if ($title === '') {
+        return ['error' => 'Informe o título do artigo.'];
+    }
+    $title = mb_substr($title, 0, 180);
+    $body = sanitize_rich_text(persist_inline_images((string) ($input['body'] ?? ''), 'manual'));
+    $excerpt = trim((string) ($input['excerpt'] ?? ''));
+    if ($excerpt === '') {
+        $plain = trim(preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags($body), ENT_QUOTES, 'UTF-8')) ?? '');
+        $excerpt = $plain !== '' ? mb_substr($plain, 0, 400) : $title;
+    } else {
+        $excerpt = sanitize_rich_text(persist_inline_images($excerpt, 'manual'));
+    }
+    $id = (int) ($input['id'] ?? 0);
+    $slug = unique_article_slug($pdo, article_slug($title, (string) ($input['slug'] ?? '')), $id);
+    $imageUrl = public_media_url((string) ($input['imageUrl'] ?? '')) ?: null;
+    if ($imageUrl === null && preg_match('/<img[^>]+src=["\']([^"\']+)["\']/i', $body, $imgMatch)) {
+        $imageUrl = public_media_url($imgMatch[1]) ?: null;
+    }
+    $linkUrl = normalize_optional_url((string) ($input['linkUrl'] ?? ''));
+    $intent = (string) ($input['intent'] ?? '');
+    if ($intent === 'publish') {
+        $status = 'published';
+    } elseif ($intent === 'draft') {
+        $status = 'draft';
+    } else {
+        $status = (($input['status'] ?? '') === 'published') ? 'published' : 'draft';
+    }
+    try {
+        if ($id) {
+            $exists = $pdo->prepare('SELECT id FROM manual_articles WHERE id = ? LIMIT 1');
+            $exists->execute([$id]);
+            if (!$exists->fetch()) {
+                $id = 0;
+            }
+        }
+        if ($id) {
+            $pdo->prepare('UPDATE manual_articles SET title=?, slug=?, excerpt=?, body=?, imageUrl=?, linkUrl=?, status=? WHERE id=?')
+                ->execute([$title, $slug, $excerpt, $body, $imageUrl, $linkUrl, $status, $id]);
+        } else {
+            $pdo->prepare('INSERT INTO manual_articles (title, slug, excerpt, body, imageUrl, linkUrl, status, createdBy) VALUES (?,?,?,?,?,?,?,?)')
+                ->execute([$title, $slug, $excerpt, $body, $imageUrl, $linkUrl, $status, $userId]);
+            $id = (int) $pdo->lastInsertId();
+        }
+    } catch (PDOException $e) {
+        $msg = $e->getMessage();
+        if (stripos($msg, 'Duplicate') !== false) {
+            return ['error' => 'Já existe um artigo com esse endereço (slug). Escolha outro.'];
+        }
+        if (stripos($msg, 'Data too long') !== false) {
+            return ['error' => 'Algum campo passou do limite. Encurte o título ou o resumo e tente de novo.'];
+        }
+        return ['error' => 'Não foi possível salvar o artigo. Tente novamente.'];
+    }
+    return ['id' => $id, 'status' => $status];
 }
 
 /** Pontos fictícios exibidos no mapa quando ainda não há cadastros reais. */

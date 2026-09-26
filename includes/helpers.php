@@ -118,11 +118,111 @@ function save_upload(string $folder, string $field = 'file'): array
     if (!move_uploaded_file($file['tmp_name'], $dest)) {
         return ['error' => 'Falha ao gravar o arquivo.'];
     }
-    return ['url' => app_url() . '/uploads/' . $folder . '/' . $name];
+    // Caminho relativo: a imagem abre no mesmo domínio, mesmo se app.url estiver errado.
+    return ['url' => '/uploads/' . $folder . '/' . $name];
+}
+
+/** Grava imagens coladas em data:URL e devolve o HTML com src em /uploads. */
+function persist_inline_images(string $html, string $folder = 'manual'): string
+{
+    return preg_replace_callback(
+        '/(<img\b[^>]*?\bsrc\s*=\s*)([\'"])data:image\/(jpeg|jpg|png|webp);base64,([A-Za-z0-9+\/=]+)\2/i',
+        function ($m) use ($folder) {
+            $bin = base64_decode($m[4], true);
+            if ($bin === false || $bin === '' || strlen($bin) > 5 * 1024 * 1024) {
+                return $m[0];
+            }
+            $ext = strtolower($m[3]);
+            if ($ext === 'jpeg') {
+                $ext = 'jpg';
+            }
+            $folder = preg_replace('/[^a-z0-9-]+/i', '', $folder) ?: 'manual';
+            $dir = dirname(__DIR__) . '/uploads/' . $folder;
+            if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
+                return $m[0];
+            }
+            $name = time() . '-' . bin2hex(random_bytes(4)) . '.' . $ext;
+            if (file_put_contents($dir . '/' . $name, $bin) === false) {
+                return $m[0];
+            }
+            return $m[1] . $m[2] . '/uploads/' . $folder . '/' . $name . $m[2];
+        },
+        $html
+    ) ?? $html;
+}
+
+/** Entrega arquivo de /uploads com MIME correto (quando o rewrite manda para o index). */
+function serve_public_upload(string $path): bool
+{
+    if (!preg_match('#^/uploads/([a-z0-9-]+)/([A-Za-z0-9._-]+\.(jpe?g|png|webp))$#i', $path, $m)) {
+        return false;
+    }
+    $file = dirname(__DIR__) . '/uploads/' . $m[1] . '/' . $m[2];
+    if (!is_file($file)) {
+        return false;
+    }
+    $ext = strtolower(pathinfo($file, PATHINFO_EXTENSION));
+    $types = ['jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'png' => 'image/png', 'webp' => 'image/webp'];
+    header('Content-Type: ' . ($types[$ext] ?? 'application/octet-stream'));
+    header('X-Content-Type-Options: nosniff');
+    header('Cache-Control: public, max-age=86400');
+    readfile($file);
+    return true;
+}
+
+/** Upload JSON usado por /api/upload.php e pelo roteador do index. */
+function handle_image_upload(): void
+{
+    $user = current_user();
+    if (!$user) {
+        json_out(['error' => 'Entre para enviar uma imagem.'], 401);
+    }
+    $kind = $_GET['kind'] ?? 'org';
+    if ($kind === 'manual' || $kind === 'admin') {
+        if (($user['role'] ?? '') !== 'admin' || !admin_gate_ok((int) $user['id'])) {
+            json_out(['error' => 'Desbloqueie a Administração para enviar imagens.'], 403);
+        }
+        $folder = $kind === 'manual' ? 'manual' : 'admin';
+    } else {
+        $folder = 'org-' . (int) $user['id'];
+    }
+    $result = save_upload($folder, 'file');
+    if (isset($result['error'])) {
+        json_out($result, 400);
+    }
+    json_out($result);
 }
 
 /** Classe CSS do item de menu da seção atual. */
 function nav_active(string $section, string $current): string
 {
     return $section === $current ? 'nav-link active' : 'nav-link';
+}
+
+/** Endereço amigável do artigo a partir do título (ou do slug digitado). */
+function article_slug(string $title, string $slug = ''): string
+{
+    $base = trim($slug) !== '' ? $slug : $title;
+    $ascii = @iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $base);
+    $base = is_string($ascii) && $ascii !== '' ? $ascii : $base;
+    $base = strtolower($base);
+    $base = preg_replace('/[^a-z0-9]+/', '-', $base) ?? '';
+    $base = trim($base, '-');
+    if ($base === '') {
+        $base = 'artigo';
+    }
+    return substr($base, 0, 220);
+}
+
+/** Completa http(s) em links de referência; vazio vira null. */
+function normalize_optional_url(string $url): ?string
+{
+    $url = trim($url);
+    if ($url === '') {
+        return null;
+    }
+    if (preg_match('#^(https?:|mailto:|/)#i', $url)) {
+        return $url;
+    }
+    return 'https://' . $url;
 }
